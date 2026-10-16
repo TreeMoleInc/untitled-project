@@ -95,7 +95,8 @@ async function handleFetch(req, env) {
     const rec = (await loadAll(env))[await idFor(ep)];
     if (!rec) return reply(404, { error: "not registered" });
     const res = await (env.sendOverride || sendPush)(rec, { title: "Test", body: "Notifications are working.", tag: "test" }, env);
-    return reply(res.ok ? 200 : 502, { ok: res.ok, status: res.status });
+    const detail = res.ok ? "" : (await res.text().catch(() => "")).slice(0, 300);
+    return reply(res.ok ? 200 : 502, { ok: res.ok, status: res.status, detail });
   }
 
   if (path === "/unsubscribe") {
@@ -119,7 +120,7 @@ async function handleFetch(req, env) {
 
 // ---------- the once-a-minute check ----------
 async function sendPush(rec, message, env) {
-  const vapid = { subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC, privateKey: env.VAPID_PRIVATE };
+  const vapid = { subject: env.VAPID_SUBJECT.trim(), publicKey: env.VAPID_PUBLIC.trim(), privateKey: env.VAPID_PRIVATE.trim() };
   const payload = await buildPushPayload({ data: JSON.stringify(message), options: { ttl: 3600, urgency: "high" } }, rec.sub, vapid);
   return fetch(rec.sub.endpoint, payload);
 }
