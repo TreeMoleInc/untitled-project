@@ -1,5 +1,5 @@
 // Keeps the app working offline. Bump CACHE when you change any file.
-const CACHE = "app-v7";
+const CACHE = "app-v8";
 const FILES = [
   "./", "index.html", "style.css", "app.js", "manifest.webmanifest",
   "icon-180.png", "icon-192.png", "icon-512.png",
