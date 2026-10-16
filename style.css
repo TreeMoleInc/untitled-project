@@ -78,6 +78,7 @@ button { cursor: pointer; }
 .card-head .spacer { flex: 1; }
 .streak { --fire: var(--muted); display: inline-flex; align-items: center; gap: 3px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px 2px 7px; font-size: 14px; font-weight: 600; }
 .streak .flame { display: inline-flex; width: 20px; height: 20px; color: var(--fire); }
+.streak small { font-size: 11px; font-weight: 500; color: var(--muted); margin-left: 1px; }
 .streak .flame svg { width: 100%; height: 100%; fill: currentColor; }
 .streak.f2 { --fire: #f2c27a; }
 .streak.f3 { --fire: #f2a06f; }
@@ -143,14 +144,33 @@ button { cursor: pointer; }
 .day.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .day.sel { background: var(--line); }
 .day .n { font-size: 11px; color: var(--muted); line-height: 1; padding: 1px 2px 2px; }
-/* Every tracked day shows a dotted outline of a full bar; it fills in as you complete it. */
-.seg { height: 9px; border-radius: 3px; border: 1.5px dotted var(--hc); position: relative; overflow: hidden; }
-.seg.s-full { background: var(--hc); border-style: solid; }
-.seg.s-partial::after { content: ""; position: absolute; inset: 0 50% 0 0; background: var(--hc); }
-.seg.s-na { border-color: transparent; background: var(--line); opacity: 0.35; }
+/* A habit's bar is split into one slice per daily sub-goal. Each starts as a dotted outline and
+   fills in as you complete it: solid = done, diagonal stripes = partly done / kinda. */
+.bar { display: flex; gap: 2px; height: 9px; }
+.slice { flex: 1; min-width: 0; border-radius: 3px; border: 1.5px dotted var(--hc); }
+.slice.s-full { background: var(--hc); border-style: solid; }
+.slice.s-partial { border-style: solid; background: repeating-linear-gradient(135deg, var(--hc) 0 3px, transparent 3px 6px); }
+.slice.s-na { border-color: transparent; background: var(--line); opacity: 0.35; }
 .day.big { padding: 6px 5px 7px; gap: 5px; min-height: 96px; }
 .day.big .n { font-size: 14px; padding: 0 0 3px; color: var(--text); }
-.day.big .seg { height: 22px; border-radius: 6px; border-width: 2px; }
+.day.big .bar { height: 22px; gap: 3px; }
+.day.big .slice { border-radius: 6px; border-width: 2px; }
+.day.big .slice.s-partial { background: repeating-linear-gradient(135deg, var(--hc) 0 4px, transparent 4px 8px); }
+
+/* weekly goals strip */
+.weekly { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-top: 12px; }
+.weekly h3 { margin: 0 0 6px; font-size: 16px; }
+.wgoal { padding: 8px 0; border-top: 1px solid var(--line); }
+.weekly h3 + .wgoal { border-top: none; }
+.wname { font-weight: 500; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.wname i { width: 10px; height: 10px; border-radius: 3px; background: var(--hc); align-self: center; }
+.wname small { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+.wrow { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.wlabel { width: 54px; font-size: 12.5px; color: var(--muted); flex: none; }
+.wboxes { display: flex; gap: 4px; }
+.slice.fixed { flex: none; width: 28px; height: 20px; border-radius: 5px; border-width: 2px; }
+.slice.fixed.s-partial { background: repeating-linear-gradient(135deg, var(--hc) 0 4px, transparent 4px 8px); }
+.wcount { font-size: 12.5px; color: var(--muted); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--hc); margin-right: 5px; }
 .key { font-size: 12px; color: var(--muted); margin-bottom: 12px; }

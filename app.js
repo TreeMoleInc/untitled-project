@@ -96,43 +96,68 @@
     return first;
   }
 
-  // status of one habit on one day: "full" | "partial" | "empty" | "na"
-  function habitDay(habit, date) {
-    let due = 0, full = 0, any = 0;
-    for (const s of habit.subs) {
-      const marks = marksOf(date, s);
-      if (s.freq === "day") {
-        if (date < s.created) continue;
-        due += s.n;
-        for (let i = 0; i < s.n; i++) {
-          const o = optOf(s, marks[i]);
-          if (o) { any++; if (o.level === "full") full++; }
-        }
-      } else {
-        const os = marks.map((id) => optOf(s, id)).filter(Boolean);
-        if (!os.length) continue;
-        due += os.length; any += os.length; full += os.filter((o) => o.level === "full").length;
-      }
+  const dailySubs = (habit) => habit.subs.filter((s) => s.freq === "day");
+  const weeklySubs = (habit) => habit.subs.filter((s) => s.freq === "week");
+
+  // One daily sub-goal on one day: "full" | "partial" | "empty" | "na" (not started yet)
+  function subDay(s, date) {
+    if (date < s.created) return "na";
+    const marks = marksOf(date, s);
+    let full = 0, any = 0;
+    for (let i = 0; i < s.n; i++) {
+      const o = optOf(s, marks[i]);
+      if (o) { any++; if (o.level === "full") full++; }
     }
-    if (!due) return "na";
-    if (full === due) return "full";
+    if (full === s.n) return "full";
     return any ? "partial" : "empty";
   }
 
-  // Days in a row the habit was fully done. Today only counts once it's done,
-  // but an unfinished today doesn't break the streak. Days with nothing due are skipped.
+  // A weekly sub-goal's ticks for the week starting `ws`: best ones first, so extra ticks still count.
+  function weekTicks(s, ws) {
+    const ticks = [];
+    for (let i = 0; i < 7; i++) for (const id of marksOf(addDays(ws, i), s)) { const o = optOf(s, id); if (o) ticks.push(o); }
+    return ticks.sort((a, b) => (b.level === "full") - (a.level === "full"));
+  }
+  // One status per required time, e.g. 3× a week -> ["full", "partial", "empty"]
+  function weekBoxes(s, ws) {
+    const ticks = weekTicks(s, ws);
+    return Array.from({ length: s.n }, (_, i) => (ticks[i] ? (ticks[i].level === "full" ? "full" : "partial") : "empty"));
+  }
+
+  // Days in a row every daily sub-goal was fully done (unfinished today doesn't break it).
+  // Habits with only weekly sub-goals count weeks instead. Returns { n, unit }.
   function streak(habit) {
-    const starts = habit.subs.map((s) => s.created).filter(Boolean).sort();
-    if (!starts.length) return 0;
-    const start = starts[0];
-    let k = todayKey(), n = 0;
-    if (habitDay(habit, k) !== "full") k = addDays(k, -1);
-    for (; k >= start; k = addDays(k, -1)) {
-      const st = habitDay(habit, k);
-      if (st === "full") n++;
-      else if (st !== "na") break;
+    const today = todayKey();
+    const daily = dailySubs(habit), weekly = weeklySubs(habit);
+    if (daily.length) {
+      const start = daily.map((s) => s.created).sort()[0];
+      const dayFull = (k) => {
+        const due = daily.filter((s) => k >= s.created);
+        return due.length ? due.every((s) => subDay(s, k) === "full") : null;
+      };
+      let k = today, n = 0;
+      if (dayFull(k) !== true) k = addDays(k, -1);
+      for (; k >= start; k = addDays(k, -1)) {
+        const ok = dayFull(k);
+        if (ok === true) n++; else if (ok === false) break;
+      }
+      return { n, unit: "day" };
     }
-    return n;
+    if (weekly.length) {
+      const start = weekStart(weekly.map((s) => s.created).sort()[0]);
+      const met = (ws) => {
+        const due = weekly.filter((s) => addDays(ws, 6) >= s.created);
+        return due.length ? due.every((s) => weekBoxes(s, ws).every((b) => b === "full")) : null;
+      };
+      let ws = weekStart(today), n = 0;
+      if (met(ws) !== true) ws = addDays(ws, -7);
+      for (; ws >= start; ws = addDays(ws, -7)) {
+        const ok = met(ws);
+        if (ok === true) n++; else if (ok === false) break;
+      }
+      return { n, unit: "week" };
+    }
+    return { n: 0, unit: "day" };
   }
 
   // ---------- view state ----------
@@ -243,7 +268,7 @@
   const fireTier = (n) => (n >= 30 ? 5 : n >= 14 ? 4 : n >= 7 ? 3 : n >= 3 ? 2 : 1);
 
   function habitCard(habit) {
-    const run = streak(habit);
+    const { n: run, unit } = streak(habit);
     const open = openStrategies.has(habit.id);
     const hasStrategies = !!(habit.strategies && habit.strategies.trim());
     const flame = h("span", { class: "flame" });
@@ -252,7 +277,7 @@
       h("h2", {}, habit.name || "Untitled"),
       hasStrategies ? h("button", { class: "strat-btn" + (open ? " open" : ""), "aria-expanded": String(open), onclick: () => { open ? openStrategies.delete(habit.id) : openStrategies.add(habit.id); render(); } }, "Strategies", h("i", {}, "▾")) : null,
       h("span", { class: "spacer" }),
-      run > 0 ? h("span", { class: `streak f${fireTier(run)}`, title: `${run} day${run === 1 ? "" : "s"} in a row` }, flame, run) : null));
+      run > 0 ? h("span", { class: `streak f${fireTier(run)}`, title: `${run} ${unit}${run === 1 ? "" : "s"} in a row` }, flame, run, unit === "week" ? h("small", {}, "wk") : null) : null));
     if (open && hasStrategies) card.append(h("div", { class: "strategies" }, habit.strategies));
     if (!habit.subs.length) card.append(h("div", { class: "sub" }, h("div", { class: "sub-meta" }, "No sub-goals yet. Tap Edit to add one.")));
     for (const sub of habit.subs) card.append(subRow(sub));
@@ -498,9 +523,41 @@
     page.append(grid);
 
     page.append(h("div", { class: "legend" }, state.habits.map((hb) => h("span", { style: `--hc:${hb.color}` }, h("i"), hb.name || "Untitled"))));
-    page.append(h("div", { class: "key" }, "Solid = done · half = partly done · dotted outline = not done yet"));
+    page.append(h("div", { class: "key" }, "Solid = done · stripes = partly done · dotted outline = not done"));
+
+    const weeks = [];
+    for (let ws = weekStart(from); ws <= to; ws = addDays(ws, 7)) if (ws <= today) weeks.push(ws);
+    const weekly = weeklySection(weeks, trackMode === "month");
+    if (weekly) page.append(weekly);
+
     page.append(dayDetail());
     return page;
+  }
+
+  // Weekly goals live in their own strip: one box per required time, filled in as the week goes.
+  function weeklySection(weeks, showLabels) {
+    const box = h("div", { class: "weekly" }, h("h3", {}, "Weekly goals"));
+    let any = false;
+    for (const hb of state.habits) for (const s of weeklySubs(hb)) {
+      const rows = weeks.filter((ws) => addDays(ws, 6) >= s.created);
+      if (!rows.length) continue;
+      any = true;
+      box.append(h("div", { class: "wgoal", style: `--hc:${hb.color}` },
+        h("div", { class: "wname" }, h("i"), s.name, h("small", {}, `${hb.name || "Untitled"} · ${freqText(s)}`)),
+        rows.map((ws) => h("div", { class: "wrow" },
+          showLabels ? h("span", { class: "wlabel" }, `${fmt(ws, { day: "numeric", month: "short" })}`) : null,
+          h("div", { class: "wboxes" }, weekBoxes(s, ws).map((st) => h("span", { class: "slice fixed s-" + st }))),
+          h("span", { class: "wcount" }, `${weekTicks(s, ws).length}/${s.n}`)))));
+    }
+    return any ? box : null;
+  }
+
+  // The bar for one habit on one day: a slice per daily sub-goal.
+  function dayBar(hb, k, future) {
+    const subs = dailySubs(hb);
+    if (!subs.length) return null;
+    return h("div", { class: "bar", style: `--hc:${hb.color}` },
+      subs.map((s) => h("span", { class: "slice s-" + (future ? "na" : subDay(s, k)) })));
   }
 
   function dayCell(k, big, today) {
@@ -510,7 +567,7 @@
       "aria-label": k, onclick: () => { selDay = k; render(); },
     },
       h("div", { class: "n" }, parseKey(k).getDate()),
-      state.habits.map((hb) => h("div", { class: "seg s-" + (future ? "na" : habitDay(hb, k)), style: `--hc:${hb.color}` })));
+      state.habits.map((hb) => dayBar(hb, k, future)));
   }
 
   function dayDetail() {
@@ -523,7 +580,8 @@
         const marks = marksOf(selDay, s);
         const parts = [];
         for (let i = 0; i < slotsFor(s); i++) { const o = optOf(s, marks[i]); parts.push(o ? o.label : "—"); }
-        box.append(h("div", { class: "srow" }, h("span", {}, s.name), h("span", {}, parts.join(", "))));
+        if (s.freq === "week") parts.push(`(${weekTicks(s, weekStart(selDay)).length}/${s.n} that week)`);
+        box.append(h("div", { class: "srow" }, h("span", {}, s.name), h("span", {}, parts.join(" "))));
         const e = entryOf(selDay, s);
         if (e && e.note) box.append(h("div", { class: "note" }, `“${e.note}”`));
       }
