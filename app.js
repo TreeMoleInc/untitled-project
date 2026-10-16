@@ -51,6 +51,7 @@
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { alertSheet("Could not save. Is the phone's storage full?"); }
+    scheduleSync();
   }
 
   const slotsFor = (sub) => (sub.freq === "day" ? sub.n : 1);
@@ -236,6 +237,7 @@
     );
 
     page.append(checkinRow());
+    if (editing) page.append(notificationsCard());
 
     if (!state.habits.length) {
       page.append(h("div", { class: "empty" },
@@ -255,13 +257,36 @@
     const c = state.checkin;
     if (!editing) {
       const at = new Date(`1970-01-01T${c.time}`).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-      return h("div", { class: "checkin" + (c.on ? "" : " off") }, c.on ? `Check-in reminder · ${at}` : "Check-in reminder · off");
+      const needsPush = c.on || state.habits.some((hb) => hb.subs.some((s) => s.remind));
+      const offNote = needsPush && pushState !== "on" && pushState !== "unavailable";
+      return h("div", { class: "checkin-wrap" },
+        h("div", { class: "checkin" + (c.on ? "" : " off") }, c.on ? `Check-in reminder · ${at}` : "Check-in reminder · off"),
+        offNote ? h("div", { class: "checkin warn" }, "Notifications are off, so reminders won't arrive. Tap Edit to turn them on.") : null);
     }
     return h("div", { class: "card", style: "--hc:var(--accent)" },
       h("div", { class: "sub stack" },
         toggle("Send me a check-in reminder", c.on, (v) => { c.on = v; save(); render(); }),
         c.on ? h("input", { type: "time", class: "plain", value: c.time, onchange: (e) => { c.time = e.target.value || "20:00"; save(); } }) : null,
-        h("p", { class: "hint" }, c.on ? "One daily nudge to tick off your habits. The reminders themselves will switch on in the next update." : "A single daily nudge to tick off your habits.")));
+        h("p", { class: "hint" }, c.on ? "One daily nudge to open the app and tick things off." : "A single daily nudge to tick off your habits.")));
+  }
+
+  function notificationsCard() {
+    const copy = {
+      unavailable: "Notifications aren't set up yet.",
+      "needs-install": "On iPhone, notifications only work once this is added to your Home Screen. Tap Share, then Add to Home Screen, and open it from the new icon.",
+      unsupported: "This browser can't receive notifications.",
+      blocked: "Notifications are blocked for this app. Turn them back on in your phone's Settings, under Notifications.",
+      off: "Reminders only arrive once notifications are turned on for this device.",
+      on: "Notifications are on for this device.",
+    }[pushState];
+    return h("div", { class: "card", style: "--hc:var(--accent)" },
+      h("div", { class: "sub stack" },
+        h("div", { class: "lbl" }, "Notifications"),
+        h("p", { class: "hint" }, copy),
+        pushState === "off" ? h("button", { class: "ghost primary", onclick: enablePush }, "Turn on notifications") : null,
+        pushState === "on" ? h("div", { class: "btns" },
+          h("button", { class: "ghost", onclick: testPush }, "Send a test"),
+          h("button", { class: "ghost", onclick: disablePush }, "Turn off")) : null));
   }
 
   const FLAME = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2s5.5 4.6 5.5 10.2A5.5 5.5 0 0 1 12 18a5.5 5.5 0 0 1-5.5-5.8c0-2 .9-3.6 2.1-4.7.1 1.6.9 2.7 2 2.9C10.3 7.6 12 2 12 2z"/><path d="M12 22a3.4 3.4 0 0 1-3.4-3.3c0-1.4 1.2-2.3 1.9-3.2.4.8 1 1.1 1.5 1.1.9-.7 1.4-1.7 1.4-2.7 1.2 1 2 2.5 2 4.1A3.4 3.4 0 0 1 12 22z" opacity=".55"/></svg>';
@@ -411,7 +436,7 @@
               h("input", { type: "time", value: t, onchange: (e) => { sub.times[i] = e.target.value || "09:00"; } }),
               sub.times.length > 1 ? h("button", { class: "ghost small", onclick: () => { sub.times.splice(i, 1); draw(); } }, "✕") : null)),
             h("button", { class: "ghost small", onclick: () => { sub.times.push("18:00"); draw(); } }, "+ Add a time"),
-            h("p", { class: "hint" }, "Your times are saved. The reminders themselves will switch on in the next update."),
+            h("p", { class: "hint" }, "You'll get a notification at each time, unless it's already done."),
           ] : null));
     };
     draw();
@@ -589,6 +614,117 @@
     return box;
   }
 
+  // ---------- notifications ----------
+  // The reminder job (see worker/) does the actual sending; here we subscribe this phone to it
+  // and keep it told about the schedule and what's already done today.
+  const PUSH_URL = "https://daily-push.tm-apps.workers.dev"; // address of the deployed reminder job
+  const VAPID_PUBLIC = "BB9Q5PRn8qjHvenbZBjCiQpnvTm1syJsuqp2Aj8zx-VMZYycAqrQhskyRvfXR6S_EJPnWY_32ILwFSyHGji7iPg";
+  let pushState = "unavailable"; // unavailable | needs-install | unsupported | blocked | off | on
+
+  const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isStandalone = () => navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  const keyBytes = (s) => {
+    const raw = atob((s + "=".repeat((4 - (s.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  };
+
+  async function currentSub() {
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg ? reg.pushManager.getSubscription() : null;
+  }
+
+  async function refreshPushState() {
+    let next;
+    if (!PUSH_URL) next = "unavailable";
+    else if (isIOS() && !isStandalone()) next = "needs-install";
+    else if (!("serviceWorker" in navigator && "PushManager" in window && "Notification" in window)) next = "unsupported";
+    else if (Notification.permission === "denied") next = "blocked";
+    else {
+      try { next = Notification.permission === "granted" && (await currentSub()) ? "on" : "off"; } catch (e) { next = "unsupported"; }
+    }
+    if (next !== pushState) { pushState = next; if (!document.querySelector(".overlay")) render(); }
+  }
+
+  async function pushPost(path, body) {
+    const res = await fetch(PUSH_URL + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  // Everything the job needs: reminder times, the check-in, and what's already done today.
+  function syncPayload(sub) {
+    const today = todayKey();
+    const items = [], skipIds = [];
+    let pending = 0;
+    for (const hb of state.habits) for (const s of hb.subs) {
+      const marks = marksOf(today, s);
+      const done = s.freq === "day"
+        ? Array.from({ length: s.n }, (_, i) => marks[i]).every(Boolean)
+        : marks.some(Boolean) || weekTicks(s, weekStart(today)).length >= s.n;
+      if (!done) pending++;
+      if (s.remind && s.times && s.times.length) {
+        items.push({ id: s.id, title: s.name, body: hb.name || "", times: s.times });
+        if (done) skipIds.push(s.id);
+      }
+    }
+    return {
+      subscription: sub.toJSON(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      items, checkin: state.checkin, skip: { date: today, ids: skipIds, allDone: pending === 0 },
+    };
+  }
+
+  let syncTimer = 0;
+  function scheduleSync() {
+    if (pushState !== "on") return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(syncNow, 1500);
+  }
+  async function syncNow() {
+    if (pushState !== "on") return;
+    try {
+      const sub = await currentSub();
+      if (sub) await pushPost("/sync", syncPayload(sub));
+    } catch (e) { /* offline: it tries again next time the app opens */ }
+  }
+
+  async function enablePush() {
+    try {
+      if ((await Notification.requestPermission()) !== "granted") { await refreshPushState(); render(); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription())
+        || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(VAPID_PUBLIC) }));
+      await pushPost("/sync", syncPayload(sub));
+      pushState = "on";
+      render();
+    } catch (e) {
+      alertSheet("Couldn't turn on notifications. Check your connection and try again.");
+    }
+  }
+
+  async function disablePush() {
+    try {
+      const sub = await currentSub();
+      if (sub) { const endpoint = sub.endpoint; await sub.unsubscribe(); pushPost("/unsubscribe", { endpoint }).catch(() => {}); }
+    } catch (e) { /* already off */ }
+    pushState = "off";
+    render();
+  }
+
+  async function testPush() {
+    try {
+      const sub = await currentSub();
+      await pushPost("/sync", syncPayload(sub));
+      await pushPost("/test", { endpoint: sub.endpoint });
+      alertSheet("Sent. It should arrive in a few seconds.");
+    } catch (e) {
+      alertSheet("The test didn't go through. Check your connection and try again.");
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshPushState().then(syncNow);
+  });
+
   // ---------- start ----------
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
@@ -603,4 +739,5 @@
     }
   });
   render();
+  refreshPushState().then(syncNow);
 })();

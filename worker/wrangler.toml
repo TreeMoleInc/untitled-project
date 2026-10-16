@@ -1,0 +1,19 @@
+name = "daily-push"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+preview_urls = false
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+VAPID_PUBLIC = "BB9Q5PRn8qjHvenbZBjCiQpnvTm1syJsuqp2Aj8zx-VMZYycAqrQhskyRvfXR6S_EJPnWY_32ILwFSyHGji7iPg"
+VAPID_SUBJECT = "https://treemoleinc.github.io/untitled-project/"
+ALLOWED_ORIGINS = "https://treemoleinc.github.io,http://127.0.0.1:8123,http://localhost:8123"
+
+# The private key is a secret and is never stored here: set with `wrangler secret put VAPID_PRIVATE`.
+# After `wrangler kv namespace create STORE`, paste the id it prints below.
+[[kv_namespaces]]
+binding = "STORE"
+id = "a261f7c8027d4de6974c9189bd964de6"

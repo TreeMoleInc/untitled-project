@@ -91,6 +91,11 @@ button { cursor: pointer; }
 .strategies { padding: 8px 14px 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--hc) 10%, transparent); }
 .checkin { font-size: 13.5px; color: var(--text); margin: 0 0 12px; }
 .checkin.off { color: var(--muted); }
+.checkin-wrap .checkin { margin-bottom: 4px; }
+.checkin-wrap { margin-bottom: 12px; }
+.checkin.warn { color: var(--danger); font-size: 12.5px; }
+.ghost.primary { background: var(--accent); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+.sub.stack .ghost { padding: 10px; }
 .sub.stack { flex-direction: column; align-items: stretch; gap: 8px; }
 .sub.stack .lbl { font-size: 13px; color: var(--muted); }
 .sub.stack .hint { margin: 0; }
